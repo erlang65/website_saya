@@ -1,25 +1,301 @@
 <!DOCTYPE html>
 <html lang="id">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Website Pertama Saya</title>
-    .css">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Peta Jaringan Jalan IRI</title>
+
+<link rel="stylesheet"
+          href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+<style>
+html, body {
+    height: 100%;
+    margin: 0;
+}
+
+#map {
+    width: 100%;
+    height: 100%;
+}
+
+.search-container{
+    position:absolute;
+    top:10px;
+    left:60px;
+    z-index:1000;
+    background:#fff;
+    padding:10px;
+    border-radius:5px;
+    box-shadow:0 0 5px rgba(0,0,0,.3);
+}
+
+.search-container input{
+    width:250px;
+    padding:6px;
+}
+
+.search-container button{
+    padding:6px 10px;
+    cursor:pointer;
+}
+
+.legend{
+    line-height:18px;
+    color:#333;
+    background:white;
+    padding:10px;
+    border-radius:5px;
+    box-shadow:0 0 5px rgba(0,0,0,.3);
+}
+
+.legend i{
+    width:18px;
+    height:18px;
+    float:left;
+    margin-right:8px;
+    opacity:0.9;
+}
+
+.info-title{
+    font-weight:bold;
+    margin-bottom:5px;
+}
+</style>
 </head>
 <body>
 
-    <header>
-        <h1>Selamat Datang</h1>
-        <p>Website pertama saya</p>
-    </header>
+<div class="search-container">
+    <input type="text"
+           id="searchBox"
+           placeholder="Cari LINK_NAME atau LINKID">
+    <button onclick="searchRoad()">Cari</button>
+</div>
 
-    <main>
-        <h2>Tentang Saya</h2>
-        <p>Halo, nama saya Erlangga.</p>
+<div id="map"></div>
 
-        <button onclick="sapa()">Klik Saya</button>
-    </main>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-    script.js"></script>
+<script>
+var map = L.map('map').setView([-0.0263, 109.3425], 12);
+
+// OpenStreetMap
+var osm = L.tileLayer(
+    'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    {
+        attribution: '&copy; OpenStreetMap '
+    }
+);
+
+// Esri Satellite
+var satellite = L.tileLayer(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    {
+        attribution: 'Tiles &copy; Esri'
+    }
+);
+
+// tampilkan default
+satellite.addTo(map);
+
+// kontrol ganti layer
+L.control.layers({
+    "OpenStreetMap": osm,
+    "Satelit": satellite
+}).addTo(map);
+
+let roadLayer;
+let allLayers = [];
+
+function getColor(iri){
+
+    if(iri === null || iri === undefined)
+        return '#808080';
+
+    if(iri <= 4) return '#00A651';      // hijau
+    if(iri <= 8) return '#FFFF00';      // kuning
+    if(iri <= 12) return '#FFA500';     // oranye
+    return '#FF0000';                   // merah
+}
+
+function styleFeature(attr){
+
+    return {
+        color: getColor(attr.IRI),
+        weight: 3,
+        opacity: 0.9
+    };
+}
+
+function createPopup(attr){
+
+    return `
+    <table>
+        <tr><td><b>LINKID</b></td><td>${attr.LINKID ?? ''}</td></tr>
+        <tr><td><b>Nama Jalan</b></td><td>${attr.LINK_NAME ?? ''}</td></tr>
+        <tr><td><b>IRI</b></td><td>${attr.IRI ?? ''}</td></tr>
+        <tr><td><b>Panjang Segmen</b></td><td>${attr.SEGMENT_LENGTH ?? ''}</td></tr>
+        <tr><td><b>Tahun Survey</b></td><td>${attr.SURVEY_YEAR ?? ''}</td></tr>
+        <tr><td><b>Lane</b></td><td>${attr.LANE_CODE ?? ''}</td></tr>
+    </table>`;
+}
+
+function esriPolylineToLatLngs(paths){
+
+    return paths.map(path =>
+        path.map(coord => [coord[1], coord[0]])
+    );
+}
+
+async function loadRoads(){
+
+    try{
+
+        const response = await fetch('jalan.json');
+        const data = await response.json();
+
+        roadLayer = L.layerGroup().addTo(map);
+
+        const bounds = [];
+
+        data.features.forEach(feature => {
+
+            const attr = feature.attributes;
+
+            const latlngs =
+                esriPolylineToLatLngs(feature.geometry.paths);
+
+            const polyline = L.polyline(
+                latlngs,
+                styleFeature(attr)
+            );
+
+            polyline.featureAttrs = attr;
+
+            polyline.bindPopup(
+                createPopup(attr)
+            );
+
+            polyline.addTo(roadLayer);
+
+            allLayers.push(polyline);
+
+            polyline.getLatLngs().flat().forEach(ll=>{
+                bounds.push(ll);
+            });
+
+        });
+
+        if(bounds.length){
+            map.fitBounds(L.latLngBounds(bounds));
+        }
+
+    }catch(err){
+
+        console.error(err);
+
+        alert(
+            'Gagal membaca jalan.json. Pastikan file berada pada folder yang sama.'
+        );
+    }
+}
+
+function resetStyle(){
+
+    allLayers.forEach(layer => {
+        const attr = layer.featureAttrs;
+
+        layer.setStyle({
+            color:getColor(attr.IRI),
+            weight:3
+        });
+    });
+}
+
+function searchRoad(){
+
+    const keyword =
+        document.getElementById('searchBox')
+        .value
+        .trim()
+        .toLowerCase();
+
+    if(!keyword) return;
+
+    resetStyle();
+
+    let foundLayer = null;
+
+    allLayers.forEach(layer=>{
+
+        const attr = layer.featureAttrs;
+
+        const nama =
+            String(attr.LINK_NAME || '')
+            .toLowerCase();
+
+        const linkid =
+            String(attr.LINKID || '')
+            .toLowerCase();
+
+        if(
+            nama.includes(keyword) ||
+            linkid.includes(keyword)
+        ){
+
+            layer.setStyle({
+                color:'#00FFFF',
+                weight:6
+            });
+
+            foundLayer = layer;
+        }
+    });
+
+    if(foundLayer){
+
+        map.fitBounds(foundLayer.getBounds());
+
+        foundLayer.openPopup();
+
+    }else{
+
+        alert('Ruas jalan tidak ditemukan');
+    }
+}
+
+document
+.getElementById("searchBox")
+.addEventListener("keypress",function(e){
+
+    if(e.key==="Enter"){
+        searchRoad();
+    }
+});
+
+const legend = L.control({position:'bottomright'});
+
+legend.onAdd = function(){
+
+    const div = L.DomUtil.create('div','legend');
+
+    div.innerHTML =
+        '<div class="info-title">Nilai IRI</div>' +
+
+        '<i style="background:#00A651"></i> ≤ 4 (Baik)<br>' +
+        '<i style="background:#FFFF00"></i> 4 - 8 (Sedang)<br>' +
+        '<i style="background:#FFA500"></i> 8 - 12 (Rusak Ringan)<br>' +
+        '<i style="background:#FF0000"></i> > 12 (Rusak Berat)<br>';
+
+    return div;
+};
+
+legend.addTo(map);
+
+loadRoads();
+
+</script>
+
 </body>
 </html>
